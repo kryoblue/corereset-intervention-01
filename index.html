@@ -3432,9 +3432,15 @@ function calcAll(){
            prevScores: PREV_SCORES ? {b:prevB,p:prevP,r:prevR} : null,
            assessmentID:assessmentID,
            age:age,
+           sex:sex,
            date:new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})};
   // Store raw inputs
-  RESULTS.raw={pat,rte,tol,brec:brec,slhrRight,slhrLeft,stsTime,dnfeHold,slsRight,slsLeft};
+  RESULTS.raw={
+    age:age,pat,rte,tol,brec:brec,
+    slhrRight,slhrLeft,stsTime,dnfeHold,slsRight,slsLeft,
+    sleep:sl,energy:en,mental:mn,tension:tn,
+    hrvRange:hrvRaw,hrvScore:hrv,hrvSkipped:hrvSkip
+  };
   // ── DBI: Domain Balance Index (informational only — does not affect composite) ──
   (function(){
     var _max = Math.max(B.score, P.score, R.score);
@@ -4810,9 +4816,88 @@ function handleDownload() {
   downloadPDF();
 }
 
+// Builds the machine-readable companion for the downloaded report from the
+// already-calculated result and snapshot values. This intentionally performs no
+// scoring or intervention selection.
+function buildAssessmentData(R){
+  var SN=SNAPSHOT || {};
+  var overallClassification=classifyScore(R.overall);
+  return {
+    patient: {
+      name:R.name || '',
+      age:R.age,
+      sex:R.sex || '',
+      occupation:R.occ || ''
+    },
+    assessment: {
+      id:R.assessmentID || '',
+      date:R.date || '',
+      overallScore:R.overall,
+      overallClassification:overallClassification
+    },
+    domainScores: {
+      breathing:R.B.score,
+      stability:R.P.score,
+      recovery:R.R.score
+    },
+    subdomainScores: {
+      breathing:{pattern:R.B.ps,route:R.B.rs,tolerance:R.B.ts,recovery:R.B.recs},
+      stability:{singleLegHeelRaise:R.P.slhrScore,sitToStand:R.P.stsScore,deepNeckFlexorEndurance:R.P.dnfeScore,singleLegStance:R.P.slsScore},
+      recovery:{sleep:R.R.sl,energy:R.R.en,mentalReadiness:R.R.mn,bodyTension:R.R.tn,hrv:R.R.hrv}
+    },
+    rawAssessmentValues:R.raw,
+    triggerFlags:{breathing:R.B.flags,stability:R.P.flags,recovery:R.R.flags},
+    classifications:{
+      breathing:{efficiency:R.B.cat,priority:R.B.pri},
+      stability:R.P.cluster,
+      recovery:R.R.cluster,
+      overall:overallClassification
+    },
+    calculatedIndices:{
+      primaryDriver:R.primaryDriver,
+      primaryDeficitScoreIndex:R.pdsi,
+      domainSpread:R.spread,
+      domainBalanceIndex:R.dbi,
+      systemEfficiencyRatio:R.ser,
+      adaptiveComposite:R.composite,
+      improvementBonus:R.bonus,
+      improvementBonusReason:R.bonusReason,
+      weakDomain:R.weakDomain,
+      previousDomainScores:R.prevScores
+    },
+    lifestyleInputs:{
+      heightCm:SN.heightCm || null,
+      weightKg:SN.weightKg || null,
+      bmi:SN.bmi || null,
+      bmiCategory:SN.bmiCat || null,
+      activity:SN.activity || '',
+      sitting:SN.sit || '',
+      wellbeing:SN.wellbeing || ''
+    },
+    interventionMetadata:{
+      breathing:R.B.ints,
+      stability:R.P.ints,
+      recovery:R.R.ints,
+      stabilityDriver:R.P.driver,
+      hrvSkipped:R.R.hrvSkip
+    }
+  };
+}
+
+function serializeAssessmentData(assessmentData){
+  // Escape HTML-significant characters so a patient-entered value cannot close
+  // the data script element. The resulting content remains valid JSON.
+  return JSON.stringify(assessmentData)
+    .replace(/</g,'\\u003c')
+    .replace(/>/g,'\\u003e')
+    .replace(/&/g,'\\u0026');
+}
+
 function downloadPDF(){
   if(!RESULTS.name){alert('Please complete the assessment first.');return;}
   var R=RESULTS;
+  var assessmentData=buildAssessmentData(R);
+  var serializedAssessmentData=serializeAssessmentData(assessmentData);
 
   // ── Inline SVG triangle chart generator (replaces hidden canvas capture) ──
   // The radar canvas is hidden (display:none) so toDataURL() returns blank.
@@ -5903,7 +5988,7 @@ function downloadPDF(){
   })()+
 
   '</div>'+
-  '</body></html>';
+  '</body><script id="corereset-data" type="application/json">'+serializedAssessmentData+'</script></html>';
 
   // No popup toolbar needed — file is downloaded directly
 
